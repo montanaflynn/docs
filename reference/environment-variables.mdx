@@ -1,0 +1,72 @@
+---
+title: "hty environment variables: socket path and log storage"
+description: "hty reads a small set of environment variables to locate its Unix socket and log storage. Override them to isolate test runs or connect over SSH tunnels."
+---
+
+hty reads a small set of environment variables to configure where its Unix socket lives and where session logs are stored. You rarely need to set any of them — the defaults work for most local use. The exception is `HTY_SOCKET`, which you must set when connecting to a remote server over an SSH tunnel or when you need strict test isolation.
+
+## Variables
+
+### `HTY_SOCKET`
+
+Overrides the Unix socket path that the `hty` client connects to.
+
+When `HTY_SOCKET` is set, the client never auto-spawns a local server. If the socket at the specified path is unreachable, the command fails immediately instead of trying to start a server. This makes it safe to use in remote and test environments where spawning an unexpected local process would be wrong.
+
+| | |
+|---|---|
+| **Default** | Derived from `XDG_RUNTIME_DIR` or `/tmp/hty-<uid>/sock` (see below) |
+| **Example** | `HTY_SOCKET=/tmp/hty-remote.sock hty list` |
+
+**When to use it:**
+
+- **SSH tunnels** — Forward the remote server's socket to a local path and point `HTY_SOCKET` at the local end of the tunnel so your local `hty` client talks to the remote server.
+- **Test isolation** — Give each test run a unique socket path so parallel test suites cannot interfere with each other.
+- **Non-default server** — Connect to a server started with a custom socket location.
+
+<Warning>
+  When `HTY_SOCKET` is set, `hty` will not start a server automatically. If nothing is listening at the socket path, the command exits immediately with an error.
+</Warning>
+
+---
+
+### `XDG_RUNTIME_DIR`
+
+Controls where the server's Unix socket is created when `HTY_SOCKET` is not set.
+
+| | |
+|---|---|
+| **Socket path when set** | `$XDG_RUNTIME_DIR/hty/sock` |
+| **Socket path when unset** | `/tmp/hty-<uid>/sock` (where `<uid>` is your numeric user ID) |
+| **Example** | `XDG_RUNTIME_DIR=/run/user/1000` → socket at `/run/user/1000/hty/sock` |
+
+Most Linux desktop environments set `XDG_RUNTIME_DIR` automatically. On minimal servers and inside containers it is often unset, so hty falls back to `/tmp`.
+
+---
+
+### `XDG_STATE_HOME`
+
+Controls where session JSONL log files are stored.
+
+| | |
+|---|---|
+| **Log path when set** | `$XDG_STATE_HOME/hty/logs/` |
+| **Log path when unset** | `~/.local/state/hty/logs/` (requires `HOME`) |
+| **Example** | `XDG_STATE_HOME=/var/lib/myapp/state` → logs at `/var/lib/myapp/state/hty/logs/` |
+
+---
+
+### `HOME`
+
+Used to compute the fallback log path `~/.local/state/hty/logs/` when `XDG_STATE_HOME` is not set. In normal environments `HOME` is always set by the shell. If both `HOME` and `XDG_STATE_HOME` are absent, hty cannot determine where to write logs and will error on session start.
+
+---
+
+## Quick reference
+
+| Variable | Affects | Default when unset |
+|---|---|---|
+| `HTY_SOCKET` | Socket path (client + server) | Derived from `XDG_RUNTIME_DIR` |
+| `XDG_RUNTIME_DIR` | Socket location | `/tmp/hty-<uid>/sock` |
+| `XDG_STATE_HOME` | Log file location | `~/.local/state/hty/logs/` |
+| `HOME` | Fallback log path | — (must be set) |

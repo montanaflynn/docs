@@ -1,0 +1,35 @@
+---
+title: "hty exit code reference — handle errors in scripts"
+description: "Every hty command exits with a numeric code. Use these codes in scripts to detect timeouts, missing sessions, ambiguous prefixes, and other failure modes."
+---
+
+Every `hty` command exits with a numeric code so that your script can detect and handle specific failures without parsing output. Most commands succeed silently with code `0`. The codes you are most likely to branch on in automation are `2` (session not found), `3` (wait timed out), and `4` (ambiguous prefix) — each one has a distinct cause and a clear recovery path.
+
+## Exit code table
+
+| Code | Name | When it occurs | How to handle it |
+|------|------|----------------|------------------|
+| `0` | `ok` | Command completed successfully | No action needed |
+| `1` | `generic` | An unexpected internal error occurred | Check stderr output; retry or report a bug |
+| `2` | `not_found` | No session matched the identifier you provided | Verify the session name or ID with `hty list` |
+| `3` | `wait_timeout` | `hty wait` reached its `--timeout` before the condition was met | Take a snapshot to inspect screen state, then decide whether to retry |
+| `4` | `ambiguous_prefix` | The short ID prefix you provided matches more than one session | Use a longer prefix or the full UUID |
+| `5` | `name_exists` | `hty run --name` was called with a name that is already in use | Choose a different name, or delete the existing session first |
+
+## Shell scripting example
+
+The example below starts a wait for text to appear on screen and then branches on the exit code:
+
+```sh
+hty wait my-session --text "Done" --timeout 5000
+case $? in
+  0) echo "Success" ;;
+  3) echo "Timed out" && hty snapshot my-session ;;
+  2) echo "Session not found" ;;
+  *) echo "Error $?" ;;
+esac
+```
+
+<Note>
+  Exit code `3` (`wait_timeout`) is the most common code to handle explicitly. When `hty wait` times out, the session is still running — taking a snapshot with `hty snapshot` lets you see the current screen state before you decide whether to retry or abort.
+</Note>

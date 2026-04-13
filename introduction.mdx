@@ -1,0 +1,83 @@
+---
+title: "What is hty? Headless terminal for agents and automation"
+description: "Learn what hty is, how its background server and PTY sessions work, and what you can automate with it — from AI agents to CI pipelines."
+---
+
+hty is a headless terminal runtime that gives AI agents, CI pipelines, and automation scripts full control over interactive TUI and CLI programs — programs like `vim`, `git add -p`, `psql`, `btop`, and `gh auth login` that ordinarily require a real keyboard and a human watching the screen. You read the rendered output and send keystrokes through a simple CLI, with no changes to the programs you are driving.
+
+## What is hty?
+
+Most automation tools work well with commands that print output and exit. They break down the moment a program draws a full-screen TUI, waits for a keypress, or changes its display in response to user input. hty solves this by running every program inside a real PTY — the same pseudo-terminal layer that powers your regular terminal emulator — and keeping a background server alive to own those sessions across multiple invocations.
+
+From your agent or script you:
+
+- Start any interactive program in a named, detached session
+- Wait for specific text to appear on the rendered screen
+- Take a snapshot of the full terminal output at any moment
+- Send text, symbolic key names (like `enter`, `esc`, `ctrl-c`), or raw bytes into the session
+- Watch a live feed of the screen without interfering with the running program
+
+hty is purpose-built for AI agents that need to navigate interactive menus or answer prompts, CI pipelines that must drive tools with no `--non-interactive` flag, and automation scripts that wrap legacy TUI programs.
+
+## How it works
+
+The first time you run any `hty` command, hty automatically starts a lightweight background server process. That server owns all PTY sessions and keeps them alive independently of any individual `hty` call — your agent can start a session, do other work, then come back seconds or minutes later and pick up exactly where it left off.
+
+<Steps>
+  <Step title="Server starts automatically">
+    hty launches the server the first time you invoke any subcommand. The server listens on a Unix socket — at `$XDG_RUNTIME_DIR/hty/sock` if that variable is set, or `/tmp/hty-<uid>/sock` otherwise. You never start or stop the server manually.
+  </Step>
+  <Step title="Sessions persist across calls">
+    Each `hty run` creates a new PTY session with a UUIDv7 identifier. Sessions stay alive in the server process across individual `hty` invocations, so your automation can be split across multiple commands, processes, or even separate scripts.
+  </Step>
+  <Step title="Clients communicate over the socket">
+    Every `hty` subcommand (`snapshot`, `send`, `wait`, `kill`, and the rest) connects to the server socket and speaks a JSONL protocol. The server routes each request to the right PTY session and streams back the response.
+  </Step>
+  <Step title="Every session is logged">
+    hty appends every terminal event to a JSONL log file under `$XDG_STATE_HOME/hty/logs/` (or `~/.local/state/hty/logs/`). You can inspect the log with `hty logs` or replay the full session later with `hty replay`.
+  </Step>
+</Steps>
+
+<Note>
+  The server shuts itself down automatically after all sessions have exited and 10 seconds of inactivity pass. You do not need to manage its lifecycle.
+</Note>
+
+## Core concepts
+
+<CardGroup cols={2}>
+  <Card title="Sessions" icon="rectangle-terminal">
+    A session is a running or completed PTY process managed by the hty server. Each session gets a UUIDv7 identifier (shown as the first 8 characters) and an optional human-friendly `--name`. Any unambiguous prefix of the ID resolves to the full session. If only one session is running, you can omit the session argument entirely.
+  </Card>
+  <Card title="Screen snapshots" icon="camera">
+    A snapshot is a point-in-time capture of the fully rendered terminal screen for a session — the same pixels a human would see. hty uses Ghostty's VT engine to emulate ANSI/VT100/VT220 terminals accurately, so the snapshot reflects real cursor positioning, color codes, and alternate screen state.
+  </Card>
+  <Card title="Wait primitives" icon="clock">
+    `hty wait` blocks until a condition is met: a string of text appears on screen (`--text`), the screen has been idle for a given duration (`--idle`), or the process exits (`--exit`). Wait primitives are the primary tool for synchronizing agent steps without arbitrary `sleep` calls.
+  </Card>
+  <Card title="Session logs" icon="file-lines">
+    Every session writes an append-only JSONL event log. The log records input, output, and timing data from the moment the session starts. Inspect it after the fact with `hty logs`, or replay the entire session with `hty replay` for debugging.
+  </Card>
+</CardGroup>
+
+## What you can do
+
+hty ships a focused set of subcommands that cover the full lifecycle of a headless terminal session:
+
+| Command | What it does |
+|---|---|
+| `hty run` | Start a new detached session in a fresh PTY |
+| `hty list` | List all running sessions |
+| `hty watch` | Observe a session's rendered screen in real time (read-only) |
+| `hty send` | Send text, a named key, or raw hex bytes to a session |
+| `hty snapshot` | Read the current rendered screen of a session |
+| `hty wait` | Block until the session matches a condition (text / idle / exit) |
+| `hty kill` | Terminate a session's process (record stays for replay) |
+| `hty delete` | Permanently remove a session record and its log file |
+| `hty logs` | Show the event log for a session |
+| `hty replay` | Replay a recorded session |
+| `hty attach` | Interactively attach to a running session (bidirectional) |
+| `hty keys` | Print supported symbolic key names |
+
+<Tip>
+  hty is in beta. The core command surface is stable and shipped. Refer to the [Commands](/commands/run-list-watch) section for detailed flags and options for each subcommand.
+</Tip>

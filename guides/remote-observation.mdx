@@ -1,0 +1,102 @@
+---
+title: 'Observe and control hty sessions remotely over SSH'
+description: 'Forward the hty Unix socket over SSH to watch or interact with sessions running on a remote machine — no agent or separate server required.'
+---
+
+hty communicates over a Unix domain socket, which SSH can forward just like a TCP port. This means you can point a local hty installation at a tunneled socket and use every hty command — `watch`, `snapshot`, `send`, `wait` — against sessions running on a remote machine. There's no separate server to configure; the same server that runs your sessions also serves remote clients through the tunnel.
+
+## How it works
+
+By default, hty connects to a socket in `$XDG_RUNTIME_DIR/hty/sock` or `/tmp/hty-<uid>/sock`. The `HTY_SOCKET` environment variable overrides that path.
+
+When you set `HTY_SOCKET`, hty uses that socket exclusively and never auto-spawns a local server. Point it at a socket forwarded from a remote machine and all subsequent commands talk to the remote hty server as if it were local.
+
+## Setting up the tunnel
+
+<Steps>
+  <Step title="Start a session on the remote machine">
+    SSH into the remote host and start your session:
+
+    ```sh
+    hty run --name foo -- vim /tmp/bar.txt
+    ```
+  </Step>
+
+  <Step title="Find the remote socket path">
+    The socket is at `$XDG_RUNTIME_DIR/hty/sock` if `XDG_RUNTIME_DIR` is set, otherwise `/tmp/hty-<uid>/sock`. Run these on the remote to find the right path:
+
+    ```sh
+    echo "${XDG_RUNTIME_DIR:-/tmp/hty-$(id -u)}/sock"
+    ```
+
+    The output is the path you'll use in the SSH command.
+  </Step>
+
+  <Step title="Forward the socket to your laptop">
+    Open the tunnel from your local machine. Replace the remote path with what you found in step 2:
+
+    ```sh
+    ssh -L /tmp/hty-remote.sock:/tmp/hty-1000/sock user@remote-host
+    ```
+
+    Keep this terminal open — the tunnel stays active as long as the SSH connection is alive.
+  </Step>
+
+  <Step title="Connect from your laptop">
+    In another terminal, set `HTY_SOCKET` and use hty normally:
+
+    ```sh
+    export HTY_SOCKET=/tmp/hty-remote.sock
+
+    hty list                    # see all remote sessions
+    hty watch foo               # observe live (read-only)
+    hty snapshot foo            # read current screen state
+    hty attach foo              # interact with the session
+    ```
+  </Step>
+</Steps>
+
+<Note>
+The SSH `-L` flag forwards a local Unix socket path to a remote Unix socket path. The syntax is `-L local-path:remote-path`, not the TCP syntax `-L local-port:host:remote-port`.
+</Note>
+
+## Read-only observation
+
+`hty watch <session>` streams the live terminal output to your local screen without giving you any input control. Use this to monitor a long-running process or show a colleague what's happening on a remote machine.
+
+```sh
+HTY_SOCKET=/tmp/hty-remote.sock hty watch foo
+```
+
+Multiple people can watch the same session simultaneously — each observer gets their own independent view of the screen.
+
+## Interactive access
+
+`hty attach <session>` connects your keyboard to the remote session. Anything you type is sent to the program as input, and you see the output in real time.
+
+```sh
+HTY_SOCKET=/tmp/hty-remote.sock hty attach foo
+```
+
+<Warning>
+Multiple people can attach to the same session at the same time. All attachers share the same input stream — keystrokes from any attacher go to the program. Coordinate with other users before attaching to an active session.
+</Warning>
+
+## Using HTY_SOCKET in scripts
+
+If you're running several commands against a remote session, export `HTY_SOCKET` once rather than setting it before every command:
+
+```sh
+export HTY_SOCKET=/tmp/hty-remote.sock
+
+hty wait foo --text "Done" --timeout 30000
+hty snapshot foo | jq -r '.snapshot.buffer'
+hty send foo --key ctrl-c
+hty delete foo
+```
+
+You can also set it in your shell profile or `.envrc` for a persistent connection to a specific remote server.
+
+<Tip>
+Use a descriptive local socket path like `/tmp/hty-prod.sock` or `/tmp/hty-staging.sock` when you maintain tunnels to multiple environments. This makes it easier to keep track of which `HTY_SOCKET` value maps to which server.
+</Tip>

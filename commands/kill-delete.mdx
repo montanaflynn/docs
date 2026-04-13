@@ -1,0 +1,86 @@
+---
+title: "hty kill and delete — stop sessions and clean up logs"
+description: "Terminate a session's process while keeping its record with hty kill, or permanently remove a session and its log file from disk with hty delete."
+---
+
+`hty kill` and `hty delete` both stop a running session, but they leave behind very different results. `hty kill` sends SIGKILL to the process and marks the session as killed — the record stays in the server, so you can still run `hty logs` and `hty replay` afterwards. `hty delete` goes further: it stops the process if it is still running, removes the session from the server entirely, and deletes the log file from disk. Use `hty kill` when you want to stop a session but keep its history, and `hty delete` when you are done with a session and want to clean it up completely.
+
+## hty kill
+
+`hty kill` terminates a session's process immediately using SIGKILL. The session record stays in the server after the kill — its name remains reserved, and its log file is closed but not removed. You can still inspect the session with `hty logs` and `hty replay` as if the process had exited normally.
+
+**Usage**
+
+```sh
+hty kill <session>
+```
+
+**Behavior**
+
+- Sends SIGKILL to the child process.
+- Sets the session status to `killed`.
+- Closes the log file — no further events are written.
+- Keeps the session record in the server (name, ID, and log file are preserved).
+- Has no effect if the session is not currently running (already exited or killed).
+
+**Examples**
+
+```sh
+hty kill debug-vim        # kill by name
+hty kill a1b2c3d4         # kill by short ID prefix
+```
+
+<Note>
+  Because the session record is preserved, `hty replay debug-vim` continues to work after `hty kill`. The log captures every event up to the moment of the kill, including a `killed` entry at the end.
+</Note>
+
+## hty delete
+
+`hty delete` permanently removes a session. If the session is still running, it kills the process first — then it removes the session from the server's registry, deletes the JSONL log file from disk, and frees the session name so it can be reused in a future `hty run`.
+
+**Usage**
+
+```sh
+hty delete <session>
+```
+
+**Behavior**
+
+- If the session is running, sends SIGKILL to the process first.
+- Removes the session from the server's registry.
+- Deletes the log file at `~/.local/state/hty/logs/<uuid>.jsonl`.
+- Deletes the by-name symlink at `~/.local/state/hty/logs/by-name/<name>.jsonl`.
+- Frees the session name — it can be assigned to a new session with `hty run --name`.
+
+**Examples**
+
+```sh
+hty delete debug-vim      # delete by name (stops if running, removes logs)
+hty delete a1b2c3d4       # delete by short ID prefix
+```
+
+<Warning>
+  Deletion is permanent. Once you delete a session, its log file is gone — `hty logs` and `hty replay` will no longer work for that session.
+</Warning>
+
+## Comparing kill and delete
+
+| | `hty kill` | `hty delete` |
+|---|---|---|
+| Stops a running process | Yes | Yes (if running) |
+| Removes session record | No | Yes |
+| Deletes log file | No | Yes |
+| Frees the session name | No | Yes |
+
+## Cleaning up finished sessions
+
+After your automation finishes, `hty list` will show sessions with a status of `exited` or `killed`. These sessions accumulate until you remove them — they do not disappear on their own. Use `hty delete` to clean them up once you no longer need their logs.
+
+```sh
+# Inspect what is left, then delete sessions you are done with
+hty list
+hty delete review-job
+hty delete build-check
+```
+
+Note that the hty server shuts itself down automatically 10 seconds after there are no running sessions. Exited and killed sessions do not count as running for this purpose — so if all your sessions have finished or been killed, the server will stop on its own without any action from you. The next `hty run` will start it again.

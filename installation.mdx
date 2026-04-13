@@ -1,0 +1,146 @@
+---
+title: "Install hty on macOS and Linux with script or Homebrew"
+description: "Install hty using the one-line install script, Homebrew, or build from source with Zig 0.15+. Covers all options, flags, and PATH setup."
+---
+
+hty runs on macOS and Linux across x86_64 and aarch64 hardware. You can install it with a single `curl` command, through Homebrew, or by compiling from source if you need a custom build. All three methods produce the same `hty` binary — choose whichever fits your environment.
+
+## Requirements
+
+- **OS**: macOS or Linux (x86_64 or aarch64)
+- **Install script**: `curl` or `wget`
+- **Homebrew**: Homebrew installed and up to date
+- **From source**: [Zig](https://ziglang.org) 0.15 or later
+
+## Install methods
+
+<Tabs>
+  <Tab title="Install script">
+    The install script auto-detects your OS and architecture, downloads the correct binary, verifies its SHA256 checksum, and places it in `~/.local/bin`.
+
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/LatentEvals/hty/main/scripts/install.sh | sh
+    ```
+
+    The script requires no elevated permissions for the default install directory. It will create `~/.local/bin` if it does not already exist.
+
+    **Options**
+
+    Pass options by appending them after `sh`:
+
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/LatentEvals/hty/main/scripts/install.sh | sh -s -- --version 0.2.0
+    ```
+
+    | Option | Description |
+    |---|---|
+    | `--version VERSION` | Install a specific release instead of the latest |
+    | `--install-dir DIR` | Change the install directory |
+    | `--force` | Overwrite an existing `hty` binary |
+    | `--verify MODE` | Checksum verification: `auto` (default), `always`, or `never` |
+    | `--dry-run` | Preview what the script would do without installing |
+    | `--silent` | Suppress all output |
+    | `--json` | Output machine-readable JSON |
+
+    <Note>
+      You can also set the `HTY_INSTALL_DIR` environment variable to override the install directory without passing `--install-dir` each time.
+
+      ```sh
+      HTY_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/LatentEvals/hty/main/scripts/install.sh | sh
+      ```
+    </Note>
+  </Tab>
+  <Tab title="Homebrew">
+    If you use Homebrew on macOS or Linux, install hty from the LatentEvals tap:
+
+    ```sh
+    brew install LatentEvals/tap/hty
+    ```
+
+    Homebrew manages updates automatically. Run `brew upgrade hty` to update to the latest release.
+  </Tab>
+  <Tab title="From source">
+    Build hty from source if you want to target a specific commit, contribute to development, or compile for an unsupported platform.
+
+    <Steps>
+      <Step title="Clone the repository">
+        ```sh
+        git clone https://github.com/LatentEvals/hty.git
+        cd hty
+        ```
+      </Step>
+      <Step title="Build with Zig">
+        ```sh
+        zig build -Doptimize=ReleaseFast
+        ```
+
+        The compiled binary is placed at `zig-out/bin/hty`.
+
+        <Warning>
+          Zig 0.15 or later is required. Earlier versions are not compatible. Check your version with `zig version` before building.
+        </Warning>
+      </Step>
+      <Step title="Copy the binary to your PATH">
+        ```sh
+        sudo cp zig-out/bin/hty /usr/local/bin/
+        ```
+
+        Or copy it to any directory already on your `PATH`, such as `~/.local/bin`, without `sudo`.
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Verify installation
+
+After installing, confirm that `hty` is available and responsive:
+
+```sh
+hty --help
+```
+
+You should see the top-level help output listing all available subcommands. If the command is not found, check your `PATH` setup below.
+
+## PATH setup
+
+The install script places `hty` in `~/.local/bin` by default. This directory is not on `PATH` in all shells and distributions. If `hty --help` returns `command not found`, add `~/.local/bin` to your `PATH`:
+
+<Tabs>
+  <Tab title="bash">
+    Add the following line to `~/.bashrc` (or `~/.bash_profile` on macOS):
+
+    ```sh
+    export PATH="$HOME/.local/bin:$PATH"
+    ```
+
+    Then reload your shell:
+
+    ```sh
+    source ~/.bashrc
+    ```
+  </Tab>
+  <Tab title="zsh">
+    Add the following line to `~/.zshrc`:
+
+    ```sh
+    export PATH="$HOME/.local/bin:$PATH"
+    ```
+
+    Then reload your shell:
+
+    ```sh
+    source ~/.zshrc
+    ```
+  </Tab>
+  <Tab title="fish">
+    ```sh
+    fish_add_path ~/.local/bin
+    ```
+
+    This change is permanent and applies to all new fish sessions immediately.
+  </Tab>
+</Tabs>
+
+<Tip>
+  Once your `PATH` is set, open a new terminal session or run the `source` command above and verify again with `hty --help`.
+</Tip>

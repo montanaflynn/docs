@@ -1,0 +1,182 @@
+---
+title: "hty snapshot, logs, and replay — inspect session output"
+description: "Capture a rendered screen with hty snapshot, stream the full event log with hty logs, and replay a recorded session visually with hty replay."
+---
+
+`hty snapshot`, `hty logs`, and `hty replay` give you three complementary ways to inspect what happened inside a session. You read the current rendered screen with `hty snapshot`, examine the raw append-only event log with `hty logs`, and replay the entire session visually — without re-running the program — with `hty replay`. All three commands work on sessions that have already exited, making them the primary tools for post-run inspection and debugging.
+
+## hty snapshot
+
+`hty snapshot` reads the fully rendered screen of a session and returns it as a JSON object. The output reflects the VT engine's current state — the same pixels a human would see — including cursor position, terminal dimensions, and any title set by the running program.
+
+**Usage**
+
+```sh
+hty snapshot <session>
+```
+
+**Response fields**
+
+<ResponseField name="ok" type="boolean" required>
+  `true` when the snapshot was read successfully.
+</ResponseField>
+
+<ResponseField name="snapshot" type="object" required>
+  <Expandable title="properties" defaultOpen>
+    <ResponseField name="rows" type="number" required>
+      Terminal height in rows.
+    </ResponseField>
+    <ResponseField name="cols" type="number" required>
+      Terminal width in columns.
+    </ResponseField>
+    <ResponseField name="cursor_row" type="number" required>
+      Current cursor row, 1-indexed.
+    </ResponseField>
+    <ResponseField name="cursor_col" type="number" required>
+      Current cursor column, 1-indexed.
+    </ResponseField>
+    <ResponseField name="title" type="string | null" required>
+      Terminal title if the running program set one via an OSC escape sequence; `null` otherwise.
+    </ResponseField>
+    <ResponseField name="buffer" type="string" required>
+      Full plain-text screen content with rows separated by newlines. No escape codes.
+    </ResponseField>
+    <ResponseField name="screen_ansi" type="string" required>
+      Full screen content with ANSI escape codes preserved — colors, bold, and other styling intact.
+    </ResponseField>
+    <ResponseField name="lines" type="string[]" required>
+      The screen split into individual rows. Equivalent to `buffer.split("\n")`, but pre-split for convenience.
+    </ResponseField>
+    <ResponseField name="status" type="string" required>
+      Session lifecycle status at the time of the snapshot. One of `running`, `exited`, `killed`, or `failed`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example**
+
+```sh
+hty snapshot my-session
+```
+
+```json
+{
+  "ok": true,
+  "snapshot": {
+    "rows": 24,
+    "cols": 80,
+    "cursor_row": 5,
+    "cursor_col": 1,
+    "title": "vim",
+    "buffer": "  1 Hello world\n~\n~\n...",
+    "screen_ansi": "\u001b[0;38;2;...Hello world...",
+    "lines": ["  1 Hello world", "~", "~"],
+    "status": "running"
+  }
+}
+```
+
+<Note>
+  `hty snapshot` works on exited sessions. If the session has already finished, the response reflects the last known screen state before the process terminated.
+</Note>
+
+## hty logs
+
+`hty logs` prints the append-only JSONL event log for a session. Every PTY event — output bytes, keystrokes, title changes, bell signals, and lifecycle transitions — is recorded as a separate JSON object, one per line, in the order it occurred. Logs persist after the session exits and are never modified retroactively.
+
+**Usage**
+
+```sh
+hty logs <session>
+```
+
+**Event types**
+
+| `kind` | Fields | Description |
+|--------|--------|-------------|
+| `spawn` | `program`, `args`, `name`, `rows`, `cols` | Session started. Records the program, its arguments, the assigned name, and the initial terminal dimensions. |
+| `output` | `bytes_hex` | Raw bytes written by the program to the PTY, hex-encoded. |
+| `input` | `bytes_hex` | Raw bytes sent to the PTY as input, hex-encoded. |
+| `title` | `title` | The program updated the terminal title via an OSC escape sequence. |
+| `bell` | — | The program emitted a terminal bell (`\a`). |
+| `exited` | `code` | The process exited. `code` is the integer exit code, or `null` if the process was terminated by a signal. |
+| `killed` | — | The session was explicitly killed with `hty kill`. |
+| `failure` | `message` | An internal server error occurred. `message` contains the error description. |
+
+Every event includes a `t` field: a Unix timestamp in milliseconds recording when the event occurred.
+
+**Storage**
+
+Logs are stored at `$XDG_STATE_HOME/hty/logs/<uuid>.jsonl`, which resolves to `~/.local/state/hty/logs/<uuid>.jsonl` if `XDG_STATE_HOME` is not set.
+
+**Example output**
+
+```jsonl
+{"t":1700000000000,"kind":"spawn","program":"git","args":["add","-p"],"name":"review","rows":24,"cols":80}
+{"t":1700000001000,"kind":"output","bytes_hex":"1b5b..."}
+{"t":1700000002000,"kind":"input","bytes_hex":"79"}
+{"t":1700000003000,"kind":"exited","code":0}
+```
+
+<Tip>
+  Because the log is plain JSONL, you can pipe it through standard tools. For example, `hty logs my-session | jq 'select(.kind == "output")'` extracts only the output events.
+</Tip>
+
+## hty replay
+
+`hty replay` replays a recorded session by feeding its logged output bytes back through a fresh in-memory VT engine. It renders the session visually in your terminal at the original timing, so you can watch exactly what the session produced — without re-running the program or producing any side effects.
+
+**Usage**
+
+```sh
+hty replay <session>
+```
+
+**How it works**
+
+`hty replay` reads the session's JSONL log file, extracts the `output` events in order, and pipes the raw bytes through a new terminal emulator. No real process is spawned. The program is never re-executed, no files are written, and no network calls are made. The replay is purely a visual reconstruction of the original output.
+
+**When to use it**
+
+- **Post-mortem debugging** — an agent ran and produced unexpected output; replay the session to see exactly what the terminal showed.
+- **Auditing** — verify what an automated process did, step by step, after the fact.
+- **Sharing demos** — record a session once and replay it repeatedly without needing the original program or environment.
+
+**Examples**
+
+```sh
+hty replay review          # replay by name
+hty replay a1b2c3d4        # replay by short ID prefix
+```
+
+<Note>
+  `hty replay` requires the session's log file to be present. If you deleted the session with `hty delete`, the log is removed and replay is no longer available.
+</Note>
+
+## Using logs and replay for debugging
+
+Suppose an AI agent ran a `git` operation in a session named `review`, and the result was not what you expected. The session has already exited. Here is how you inspect it:
+
+**1. Check the final screen state**
+
+```sh
+hty snapshot review
+```
+
+The `buffer` field shows what the terminal displayed when the session ended. The `status` field confirms whether the process exited cleanly or was killed.
+
+**2. Inspect the full event sequence**
+
+```sh
+hty logs review
+```
+
+Look for `input` events to see what keystrokes the agent sent, and `output` events to reconstruct what the program returned. An `exited` event at the end of the log with a non-zero `code` field confirms the process failed.
+
+**3. Watch the session play back**
+
+```sh
+hty replay review
+```
+
+Replay the session in your terminal to see the full visual sequence — including any prompts, confirmations, or error messages that appeared during the run.

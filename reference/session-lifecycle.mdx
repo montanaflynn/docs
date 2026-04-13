@@ -1,0 +1,102 @@
+---
+title: "hty session lifecycle: statuses, logs, and server shutdown"
+description: "Learn every stage a session passes through from hty run to hty delete, including status transitions, name reservation, log storage, and server shutdown."
+---
+
+Understanding what happens between `hty run` and `hty delete` helps you write reliable automation. Sessions are not ephemeral — they persist in the server after their process exits, which means `hty logs` and `hty replay` keep working even after a program finishes or is killed. This page covers every stage of that lifecycle so you know exactly what state a session is in, and what you can do with it, at any point.
+
+## Session statuses
+
+Every session carries one of four statuses. The status changes as the process moves through its lifecycle.
+
+| Status | Meaning |
+|--------|---------|
+| `running` | The process is alive and active inside the PTY |
+| `exited` | The process exited on its own; an exit code is available |
+| `killed` | The process was terminated via `hty kill` or `hty delete` |
+| `failed` | An internal error occurred in the PTY reader |
+
+<Note>
+  Only `running` sessions count as active for the purposes of server shutdown. Sessions in the `exited` or `killed` state stay in `hty list` until you remove them with `hty delete`, but they do not prevent the server from stopping.
+</Note>
+
+## Lifecycle transitions
+
+The steps below trace the full path from session creation to removal.
+
+<Steps>
+  <Step title="hty run — session created">
+    hty spawns the program in a new PTY, assigns a UUIDv7 session ID, opens a JSONL log file, and writes a `spawn` event. The session status is immediately `running`. If you used `--name`, the name is registered and a by-name symlink is created in the log directory.
+  </Step>
+  <Step title="Process produces output">
+    PTY output is captured and appended to the log as `output` events. `hty snapshot` reads the fully rendered screen at any point. `hty watch` streams the live screen without interfering with the program.
+  </Step>
+  <Step title="hty send — input delivered">
+    When you call `hty send`, the input is forwarded to the PTY and logged as an `input` event. The process sees the input exactly as if a user had typed it.
+  </Step>
+  <Step title="Process exits naturally — status: exited">
+    When the process exits on its own, the session status moves to `exited`, the exit code is recorded, and the log file is closed. The session record remains in the server and is visible in `hty list`.
+  </Step>
+  <Step title="hty kill — status: killed (optional)">
+    If you call `hty kill`, SIGKILL is sent to the process immediately. The status moves to `killed` and the log file is closed. The session record and name stay reserved — `hty logs` and `hty replay` continue to work.
+  </Step>
+  <Step title="hty delete — record removed">
+    `hty delete` is the final step. If the session is still running, it kills the process first. Then it removes the session from the server's registry, deletes the JSONL log file, deletes the by-name symlink, and frees the name for reuse.
+  </Step>
+</Steps>
+
+## Persistent records
+
+Sessions with status `exited` or `killed` stay in `hty list` until you explicitly delete them. This is intentional — it lets you call `hty logs` and `hty replay` after the program has finished, which is useful for debugging and audit trails. Clean up finished sessions with `hty delete` when you no longer need their logs.
+
+```sh
+hty list                   # see all sessions including exited ones
+hty replay build-job       # replay a finished session
+hty delete build-job       # remove it when you are done
+```
+
+## Session identification
+
+You can refer to any session in four ways:
+
+| Method | Example | When to use |
+|--------|---------|-------------|
+| Full UUIDv7 | `018f4a2b-1234-7abc-...` | When you need certainty |
+| Short prefix | `018f4a2b` | Any unambiguous prefix of the UUID |
+| Human name | `build-job` | Assigned with `hty run --name build-job` |
+| Omit entirely | _(no argument)_ | Only when exactly one session is running |
+
+<Tip>
+  If a prefix matches more than one session, hty exits with code `4` (`ambiguous_prefix`). Use a longer prefix or the full UUID to disambiguate.
+</Tip>
+
+## Name reservation
+
+Names are reserved until the session is deleted, not just until it exits or is killed.
+
+- After `hty kill`, the name stays reserved. `hty replay NAME` still works.
+- After `hty delete`, the name is freed. A new session can be started with the same `--name`.
+
+This means you can always replay or inspect a session by name right up until the moment you delete it.
+
+## Storage
+
+hty stores two kinds of data on disk: the Unix socket used for client-server communication, and the JSONL log files for each session.
+
+| Data | Path |
+|------|------|
+| Unix socket | `$XDG_RUNTIME_DIR/hty/sock` or `/tmp/hty-<uid>/sock` |
+| Session log | `$XDG_STATE_HOME/hty/logs/<uuid>.jsonl` or `~/.local/state/hty/logs/<uuid>.jsonl` |
+| By-name symlink | `...hty/logs/by-name/<name>.jsonl` → `../<uuid>.jsonl` |
+
+See [Environment variables](/reference/environment-variables) to override these paths.
+
+## Server lifecycle
+
+The hty server starts automatically the first time you run any `hty` command — you never need to start it manually. It shuts itself down automatically 10 seconds after the count of `running` sessions drops to zero. Sessions in the `exited` or `killed` state do not count.
+
+The next `hty run` starts the server again. From your automation's point of view, the server is always available — the auto-start and auto-shutdown happen transparently in the background.
+
+<Note>
+  If you set `HTY_SOCKET` to point at a custom socket path, the client will not auto-spawn a server. See [Environment variables](/reference/environment-variables) for details.
+</Note>

@@ -1,0 +1,76 @@
+---
+title: "hty: Headless Terminal for AI Agents and Automation"
+description: "hty gives AI agents and automation scripts a way to drive interactive TUI and CLI programs by reading the rendered screen and sending keystrokes."
+---
+
+hty is a headless terminal runtime that lets AI agents, automation scripts, and CI pipelines control interactive programs like `vim`, `git add -p`, `psql`, `btop`, and `gh auth login` — programs that ordinarily require a real keyboard and screen. It spawns programs inside a real PTY, maintains a persistent background server across invocations, and exposes a simple CLI for reading the screen and sending input.
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install hty with a one-line script, Homebrew, or build from source.
+  </Card>
+  <Card title="Quick Start" icon="bolt" href="/quickstart">
+    Walk through a complete agent workflow in under five minutes.
+  </Card>
+  <Card title="Commands" icon="terminal" href="/commands/run-list-watch">
+    Full reference for every hty subcommand and its flags.
+  </Card>
+  <Card title="Guides" icon="book-open" href="/guides/ai-agents">
+    Step-by-step guides for AI agents, CI automation, and remote sessions.
+  </Card>
+</CardGroup>
+
+## How hty works
+
+hty runs a lightweight background server the first time you invoke it. That server owns all PTY sessions and keeps them alive across individual `hty` calls — so your agent can send one command, do other work, then come back and read the screen later.
+
+<Steps>
+  <Step title="Start a session">
+    Run any interactive program in a detached PTY session with a human-friendly name.
+    ```sh
+    hty run --name my-session -- git add -p
+    ```
+  </Step>
+  <Step title="Wait for output">
+    Block until specific text appears on the screen, the screen goes idle, or the process exits.
+    ```sh
+    hty wait my-session --text "Stage this hunk" --timeout 5000
+    ```
+  </Step>
+  <Step title="Read the screen">
+    Take a snapshot of the full rendered terminal screen at any time.
+    ```sh
+    hty snapshot my-session
+    ```
+  </Step>
+  <Step title="Send input">
+    Type text, press named keys, or send raw bytes into the session.
+    ```sh
+    hty send my-session --text "y\n"
+    hty send my-session --key esc
+    ```
+  </Step>
+</Steps>
+
+## Key capabilities
+
+<CardGroup cols={2}>
+  <Card title="Persistent sessions" icon="server">
+    Sessions live in the background server and survive across `hty` invocations. No need to keep a process open.
+  </Card>
+  <Card title="Screen snapshots" icon="camera">
+    Read the fully rendered terminal screen as plain text or with ANSI color codes at any point.
+  </Card>
+  <Card title="Smart wait primitives" icon="clock">
+    Block until text appears, the screen goes idle, or the process exits — with configurable timeouts.
+  </Card>
+  <Card title="Live observation" icon="eye">
+    Watch any session's screen in real time from another terminal with `hty watch`, without interfering.
+  </Card>
+  <Card title="Session replay" icon="rotate-left">
+    Every session is logged to an append-only JSONL file. Replay it later with `hty replay`.
+  </Card>
+  <Card title="Remote access" icon="network-wired">
+    Point `$HTY_SOCKET` at an SSH tunnel to observe or drive sessions running on another machine.
+  </Card>
+</CardGroup>

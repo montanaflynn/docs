@@ -1,0 +1,137 @@
+---
+title: 'Automate interactive CLI tools in CI/CD pipelines with hty'
+description: 'Script programs that require keyboard input — database CLIs, auth flows, scaffolding tools — by giving them a real PTY and driving them with hty in CI.'
+---
+
+CI pipelines break when a program stops to ask a question. Tools like `psql`, `gh auth login`, `npm init`, and most scaffolding CLIs expect a real terminal and a human at the keyboard. Mocking stdin rarely works because these programs check for a TTY. hty gives them a genuine pseudoterminal so they behave exactly as they would locally, then lets your script drive the interaction step by step.
+
+## Why hty in CI
+
+Some programs can't be driven with piped stdin or environment variables alone:
+
+- **Database CLIs** (`psql`, `mysql`) may prompt for passwords or confirmation before destructive operations
+- **Auth flows** (`gh auth login`, `vault login`) open interactive pickers
+- **Scaffolding tools** (`npm init`, `create-next-app`, `cargo new`) ask a series of questions
+- **Package managers** (`pip`, `npm`) sometimes ask for confirmation before installing
+
+These tools behave normally inside an hty session. You then use `hty wait` and `hty send` to answer their prompts from your CI script.
+
+## Basic pattern
+
+A complete CI step using hty follows this structure:
+
+```sh
+#!/bin/sh
+set -e
+
+# Start an interactive session
+hty run --name ci-task -- your-interactive-program
+
+# Wait for first prompt — fail if it doesn't appear within 30 seconds
+hty wait ci-task --text "Are you sure?" --timeout 30000
+
+# Confirm
+hty send ci-task --text "yes\n"
+
+# Wait for completion
+hty wait ci-task --exit --timeout 60000
+
+# Verify output
+OUTPUT=$(hty snapshot ci-task | jq -r '.snapshot.buffer')
+echo "$OUTPUT" | grep -q "Success" || exit 1
+
+# Clean up
+hty delete ci-task
+```
+
+<Note>
+`set -e` causes the script to exit immediately if any command returns a non-zero exit code. Because `hty wait` exits with code 3 on timeout, a timed-out wait will stop your script and fail the CI job — which is usually what you want.
+</Note>
+
+## Handling timeouts
+
+When a `hty wait` times out, it exits with code **3**. You can catch this explicitly if you need custom error handling instead of relying on `set -e`:
+
+```sh
+hty wait ci-task --text "Confirm?" --timeout 30000
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -eq 3 ]; then
+  echo "ERROR: Timed out waiting for confirmation prompt"
+  echo "--- Current screen state ---"
+  hty snapshot ci-task | jq -r '.snapshot.buffer'
+  hty delete ci-task
+  exit 1
+elif [ $EXIT_CODE -ne 0 ]; then
+  echo "ERROR: hty wait failed with code $EXIT_CODE"
+  hty delete ci-task
+  exit 1
+fi
+```
+
+<Tip>
+Capture the snapshot on failure to see exactly what was on screen when the timeout occurred. This makes CI failures much easier to diagnose.
+</Tip>
+
+## Multiple sessions in parallel
+
+hty sessions are independent. You can run several at once and wait on each separately:
+
+```sh
+# Launch two sessions in the background
+hty run --name migrate -- rails db:migrate
+hty run --name seed -- rails db:seed
+
+# Wait for each independently
+hty wait migrate --exit --timeout 120000
+hty wait seed --exit --timeout 60000
+
+# Check results
+hty snapshot migrate | jq -r '.snapshot.buffer'
+hty snapshot seed | jq -r '.snapshot.buffer'
+
+# Clean up both
+hty delete migrate
+hty delete seed
+```
+
+<Warning>
+If two sessions interact with the same external resource (e.g., the same database), run them sequentially instead of in parallel to avoid conflicts.
+</Warning>
+
+## Cleanup
+
+Always delete sessions at the end of a CI job, even on failure. Use a trap to ensure cleanup runs regardless of how the script exits:
+
+```sh
+#!/bin/sh
+set -e
+
+cleanup() {
+  hty delete ci-task 2>/dev/null || true
+}
+trap cleanup EXIT
+
+hty run --name ci-task -- your-interactive-program
+# ... rest of your script
+```
+
+The hty server shuts down automatically 10 seconds after the last running session is removed, so you don't need to manage the server process separately.
+
+## Environment variables
+
+Use `HTY_SOCKET` to point hty at a specific Unix socket path. This lets you isolate parallel CI jobs that each start their own hty server:
+
+```sh
+# Start a server bound to a job-specific socket path, then run your session
+HTY_SOCKET=/tmp/hty-job-${CI_JOB_ID}.sock hty run --name ci-task -- your-interactive-program
+export HTY_SOCKET=/tmp/hty-job-${CI_JOB_ID}.sock
+```
+
+<Warning>
+When `HTY_SOCKET` is set, hty does **not** auto-start a server. You must start the server separately bound to that socket path before using other commands. For most CI use cases the default socket (without `HTY_SOCKET`) is simpler — use socket isolation only when multiple jobs share the same machine and could conflict.
+</Warning>
+
+<Note>
+Socket isolation is most useful on self-hosted runners where multiple CI jobs run simultaneously on the same machine.
+</Note>

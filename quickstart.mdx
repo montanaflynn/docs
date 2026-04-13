@@ -1,0 +1,166 @@
+---
+title: "Quick start: run your first hty session in minutes"
+description: "Run your first hty session, read the terminal screen, and send keystrokes — then see a real automation example driving git add -p."
+---
+
+hty lets you drive any interactive CLI or TUI program from a script or AI agent. In this quickstart you will start a detached terminal session, send text into it, read back the rendered screen, and clean up — all from the command line. By the end you will have everything you need to automate your first real workflow.
+
+## Prerequisites
+
+- hty installed — see [Installation](/installation) if you haven't done that yet
+- Any program to try: `cat`, `git`, `vim`, or whatever is already on your system
+
+## Your first session
+
+<Steps>
+  <Step title="Start a session">
+    Run `cat` inside a new named hty session:
+
+    ```sh
+    hty run --name demo -- cat
+    ```
+
+    hty starts a background server on first use (you will never need to manage it manually), then launches `cat` inside a real PTY. The `--name demo` flag gives the session a human-friendly handle you can use in every subsequent command. The `--` separator marks the end of hty flags and the start of the program and its arguments.
+
+    <Note>
+      The server starts automatically and keeps sessions alive between `hty` calls. You can start a session, do other work, and come back to it later.
+    </Note>
+  </Step>
+
+  <Step title="Send some text">
+    Type a line into the running session:
+
+    ```sh
+    hty send demo --text "hello from hty\n"
+    ```
+
+    The `\n` at the end sends a newline, which causes `cat` to echo the line back. You can send any text, including multi-line strings, escape sequences, or raw keystrokes. To press a named key instead of typing text, use `--key`:
+
+    ```sh
+    hty send demo --key ctrl-c
+    ```
+  </Step>
+
+  <Step title="Read the screen">
+    Take a snapshot of the current rendered terminal output:
+
+    ```sh
+    hty snapshot demo
+    ```
+
+    hty returns a JSON object with the full screen buffer, individual lines, cursor position, and session status:
+
+    ```json
+    {
+      "ok": true,
+      "snapshot": {
+        "rows": 24,
+        "cols": 80,
+        "cursor_row": 3,
+        "cursor_col": 1,
+        "title": null,
+        "buffer": "hello from hty\nhello from hty\n",
+        "lines": ["hello from hty", "hello from hty", ""],
+        "status": "running"
+      }
+    }
+    ```
+
+    The `buffer` field contains the full rendered screen as a single string. Your agent can search it for expected output, pass it to an LLM, or assert on specific content.
+  </Step>
+
+  <Step title="Watch it live (optional)">
+    Open a second terminal and observe the session in real time:
+
+    ```sh
+    hty watch demo
+    ```
+
+    `hty watch` renders the live screen without interfering with the running program. It is useful for debugging — you can see exactly what your script sees.
+
+    <Tip>
+      `hty list` shows all active sessions if you ever lose track of what is running.
+    </Tip>
+  </Step>
+
+  <Step title="Clean up">
+    Terminate the process and remove the session record:
+
+    ```sh
+    hty kill demo
+    hty delete demo
+    ```
+
+    `hty kill` sends a signal to the running process and stops it. The session record and its log file stay on disk until you run `hty delete`. This lets you inspect the log or replay the session after the process exits.
+  </Step>
+</Steps>
+
+## A real automation example
+
+The following example walks an agent through `git add -p` — the interactive patch-staging tool that draws a full-screen diff and waits for your input on each hunk. This is the kind of workflow hty is built for.
+
+```sh
+hty run --name review -- git add -p
+```
+
+Start the session. `git add -p` draws the first hunk immediately, so you do not need to send anything to get it started.
+
+```sh
+hty wait review --text "Stage this hunk" --timeout 5000
+```
+
+Block until the text `"Stage this hunk"` appears on screen, with a 5-second timeout. If the text does not appear in time, hty exits with code `3` so your script can handle the error. This replaces an arbitrary `sleep` call with a reliable signal.
+
+```sh
+hty snapshot review
+```
+
+Read the rendered screen so your agent can inspect the diff content before deciding what to do.
+
+```sh
+hty send review --text "y\n"
+```
+
+Stage the hunk by sending `y` followed by a newline. `git add -p` advances to the next hunk.
+
+```sh
+hty wait review --idle 200 --timeout 3000
+```
+
+Wait for the screen to stop changing for 200 ms. This is the right synchronization primitive when you are waiting for a redraw rather than a specific string.
+
+```sh
+hty send review --text "n\n"
+```
+
+Skip the next hunk.
+
+```sh
+hty send review --text "q\n"
+```
+
+Quit the patch tool.
+
+```sh
+hty wait review --exit --timeout 2000
+```
+
+Block until the `git add -p` process exits cleanly. Your script can now proceed knowing the staging operation is complete.
+
+<Note>
+  Session names support unambiguous prefix matching — if `review` is the only session whose name starts with `r`, you can type `hty snapshot r` instead. If only one session is running at all, you can omit the session argument entirely.
+</Note>
+
+## What's next
+
+<CardGroup cols={3}>
+  <Card title="Commands reference" icon="terminal" href="/commands/run-list-watch">
+    Full flags and options for every hty subcommand — `run`, `send`, `wait`, `snapshot`, `watch`, and more.
+  </Card>
+  <Card title="AI agents guide" icon="robot" href="/guides/ai-agents">
+    Patterns for wiring hty into an LLM agent loop, including snapshot-based prompting and error handling.
+  </Card>
+  <Card title="CI automation guide" icon="gear" href="/guides/ci-automation">
+    Use hty in CI environments to drive interactive tools that have no `--non-interactive` flag.
+  </Card>
+</CardGroup>

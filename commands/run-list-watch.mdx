@@ -1,0 +1,172 @@
+---
+title: "hty run, list, and watch — start and observe sessions"
+description: "Start a detached PTY session with hty run, inspect all sessions with hty list, and observe a live terminal screen in real time with hty watch."
+---
+
+`hty run`, `hty list`, and `hty watch` are the three commands you use to create and observe sessions. You start a program in a named, detached PTY with `hty run`, see every session the server knows about with `hty list`, and stream a live view of any session's rendered screen with `hty watch` — all without touching the running process.
+
+## hty run
+
+`hty run` starts a new detached session in a fresh PTY. The background server starts automatically if it is not already running, so you never need to manage it manually. The session persists until you explicitly kill or delete it.
+
+**Usage**
+
+```sh
+hty run [flags] -- <program> [args...]
+```
+
+The `--` separator marks the end of hty flags and the start of the program and its arguments. Everything after `--` is passed directly to the spawned process.
+
+**Flags**
+
+<ParamField path="--name" type="string">
+  Assign a human-friendly name to the session. The name must be unique across all active sessions — if a session with that name already exists, hty exits with code 5. You can use the name in place of the session ID in any subsequent command.
+</ParamField>
+
+<ParamField path="--rows" type="number" default="24">
+  Terminal height in rows. Set this to match the expected screen layout of your program.
+</ParamField>
+
+<ParamField path="--cols" type="number" default="80">
+  Terminal width in columns.
+</ParamField>
+
+<ParamField path="--scrollback" type="number" default="10000">
+  Number of lines to keep in the scrollback buffer.
+</ParamField>
+
+<ParamField path="--cwd" type="string">
+  Working directory for the spawned process. Defaults to the current directory if omitted.
+</ParamField>
+
+<ParamField path="--env" type="string">
+  Set an environment variable for the spawned process as `KEY=VALUE`. Repeat the flag to set multiple variables.
+</ParamField>
+
+**Return value**
+
+`hty run` prints a JSON session summary on success:
+
+```json
+{
+  "id": "a1b2c3d4-...",
+  "name": "debug-vim",
+  "program": "vim",
+  "status": "running",
+  "created_at_ms": 1712345678000
+}
+```
+
+**Examples**
+
+```sh
+hty run --name debug-vim -- vim /tmp/foo.txt
+```
+
+```sh
+hty run --name my-psql --rows 40 --cols 120 -- psql -U postgres mydb
+```
+
+```sh
+hty run --name agent-task --cwd /workspace -- bash -c "npm install && npm test"
+```
+
+```sh
+hty run --name load-test --env CONCURRENCY=50 --env LOG_LEVEL=debug -- ./run-bench.sh
+```
+
+<Note>
+  The `--` separator is required. Without it, hty cannot tell where its own flags end and the program's arguments begin.
+</Note>
+
+## hty list
+
+`hty list` prints every session the server knows about — both running sessions and those that have already exited or been killed. Use it to find session IDs or names when you need to refer to a session in another command.
+
+**Usage**
+
+```sh
+hty list
+```
+
+**Output**
+
+Each row in the output represents one session:
+
+| Column | Description |
+|--------|-------------|
+| `ID` | First 8 hex characters of the session's UUIDv7. Any unambiguous prefix of this value can be used to identify the session. |
+| `NAME` | Human-friendly name assigned at `hty run --name`, if any. |
+| `PROGRAM` | The executable that was passed after `--`. |
+| `STATUS` | One of `running`, `exited`, `killed`, or `failed`. |
+| `CREATED` | How long ago the session was created. |
+
+**Example output**
+
+```
+ID       NAME         PROGRAM  STATUS   CREATED
+a1b2c3d4 debug-vim    vim      running  2 min ago
+e5f6a7b8 my-psql      psql     exited   5 min ago
+```
+
+Sessions with a status of `exited` or `killed` remain in the list until you remove them with `hty delete`. Their logs and recorded output are still available for inspection or replay.
+
+## hty watch
+
+`hty watch` streams the rendered screen of a running session to your terminal in real time. It is read-only — watching a session does not send any input to the program and does not affect its execution.
+
+**Usage**
+
+```sh
+hty watch [<session>]
+```
+
+**Flags**
+
+<ParamField path="<session>" type="string">
+  The session to observe, identified by ID, name, or any unambiguous prefix. You can omit this argument entirely if only one session is currently running.
+</ParamField>
+
+**Behavior**
+
+- The screen updates in your terminal as the observed session produces output.
+- `hty watch` exits automatically when the observed session's process exits.
+- You can run `hty watch` from any terminal that can reach the hty server, including remote terminals over SSH.
+- Multiple watchers can observe the same session simultaneously without interfering with each other.
+
+**Examples**
+
+```sh
+hty watch debug-vim
+```
+
+```sh
+hty watch a1b2c3d4
+```
+
+```sh
+# If only one session is running, omit the session argument
+hty watch
+```
+
+<Tip>
+  `hty watch` is useful for debugging automation scripts. Open it in a second terminal while your agent or script drives the session, and you will see exactly what the agent sees — in real time.
+</Tip>
+
+## Identifying sessions
+
+Every command that targets a session accepts the session as a positional argument or `--name` value. hty resolves sessions in this order:
+
+1. **Full UUID** — The complete 36-character UUIDv7 assigned at session creation.
+2. **Short ID** — The first 8 hex characters shown by `hty list`. This uniquely identifies a session in most cases.
+3. **Unambiguous prefix** — Any prefix of the UUID that matches exactly one session. If two sessions share the same prefix, hty exits with code 4 (ambiguous prefix).
+4. **Name** — The human-friendly string you passed to `--name` at `hty run`.
+5. **Omitted** — If you provide no session argument at all and exactly one session is running, hty uses that session automatically.
+
+**Error codes related to session identification**
+
+| Code | Meaning |
+|------|---------|
+| 2 | Session not found — no session matches the identifier you provided. |
+| 4 | Ambiguous prefix — more than one session matches the prefix. Use a longer prefix or the full ID. |
+| 5 | Name already exists — the name you passed to `hty run --name` is already in use by another session. |

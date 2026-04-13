@@ -1,0 +1,120 @@
+---
+title: "hty attach and keys — interactive access and key reference"
+description: "Use hty attach for bidirectional access to a running session, and hty keys to list every symbolic key name you can pass to hty send --key."
+---
+
+`hty attach` and `hty keys` are two commands for direct terminal interaction. `hty attach` gives you a live, bidirectional connection to a running session — you can type into it and see its output in real time, just like sitting at that terminal. `hty keys` prints every symbolic key name you can pass to `hty send --key`, organized so you can quickly find what you need when scripting non-printable keypresses.
+
+## hty attach
+
+`hty attach` opens a bidirectional connection to a running session. The session's current screen is rendered immediately, and everything you type is forwarded to the session's PTY as if you were at the keyboard. Unlike `hty watch`, which is read-only, `hty attach` lets you interact with the running program directly.
+
+Use `hty attach` when you need to take manual control of a session that was started by an agent or automation — to inspect its state, answer an unexpected prompt, or intervene before the program continues. Use `hty watch` when you only need to observe output without affecting it.
+
+**Usage**
+
+```sh
+hty attach <session>
+```
+
+**Flags**
+
+<ParamField path="<session>" type="string" required>
+  The session to attach to, identified by ID, name, or any unambiguous prefix.
+</ParamField>
+
+<ParamField path="--rows" type="number">
+  Resize the session's PTY to this many rows when attaching. Useful when your terminal height differs from the PTY dimensions the session was started with.
+</ParamField>
+
+<ParamField path="--cols" type="number">
+  Resize the session's PTY to this many columns when attaching.
+</ParamField>
+
+**What happens when you attach**
+
+When you run `hty attach`, the server sends an initial acknowledgment, followed immediately by a snapshot of the current screen. From that point:
+
+- PTY output streams to your terminal as it is produced.
+- Everything you type is forwarded to the session as raw input bytes.
+- You can resize your terminal window; hty propagates the new dimensions to the PTY automatically.
+- Detaching (pressing the detach sequence or closing the connection) leaves the session running undisturbed.
+
+**Multiple simultaneous attachers**
+
+Multiple `hty attach` connections can be open on the same session at the same time. All attachers see the same output. All attachers can send input, and whatever they type is interleaved into the session's PTY. This makes `hty attach` useful for pair-debugging: two people can watch and interact with the same session simultaneously.
+
+**Examples**
+
+```sh
+hty attach debug-vim
+```
+
+```sh
+hty attach a1b2c3d4
+```
+
+```sh
+# Attach and resize the PTY to match a wider terminal
+hty attach debug-vim --rows 40 --cols 160
+```
+
+<Note>
+  `hty attach` requires the session to be in the `running` state. If the process has already exited, use `hty replay` to review its recorded output.
+</Note>
+
+<Tip>
+  If an automation script gets stuck waiting for input, open a second terminal, run `hty attach` to inspect and respond to the prompt, then detach. Your script continues from where it paused.
+</Tip>
+
+## hty keys
+
+`hty keys` prints every symbolic key name that `hty send --key` accepts. Run it any time you need to check the exact name for a key before scripting it.
+
+**Usage**
+
+```sh
+hty keys
+```
+
+`hty keys` takes no arguments or flags and produces no side effects. It reads nothing from the server and works even if no sessions are running.
+
+**Key categories**
+
+| Category | Key names |
+|----------|-----------|
+| Navigation | `up`, `down`, `left`, `right`, `home`, `end`, `page-up`, `page-down` |
+| Editing | `enter`, `tab`, `backspace`, `delete`, `insert`, `escape`, `esc` |
+| Function keys | `f1`, `f2`, `f3`, `f4`, `f5`, `f6`, `f7`, `f8`, `f9`, `f10`, `f11`, `f12` |
+| Ctrl combos | `ctrl-a` through `ctrl-z`, `ctrl-[`, `ctrl-\`, `ctrl-]`, `ctrl-^`, `ctrl-_` |
+| Other | `space` |
+
+`escape` and `esc` are aliases for the same key. Use whichever reads more clearly in your script.
+
+**Using key names with hty send**
+
+Pass any name from `hty keys` to `hty send --key` to inject that keypress into a session:
+
+```sh
+# Dismiss a modal or exit insert mode in Vim
+hty send my-session --key esc
+
+# Interrupt a running process
+hty send my-session --key ctrl-c
+
+# Signal end-of-file to a program reading from stdin
+hty send my-session --key ctrl-d
+
+# Confirm a prompt
+hty send my-session --key enter
+
+# Move up through command history
+hty send my-session --key up
+
+# Trigger a function key
+hty send my-session --key f1
+```
+
+<Tip>
+  Use `hty send --key` instead of `hty send --text "\n"` when you want to be explicit about sending Enter, or use it for keys that have no printable representation at all. For keys like `ctrl-c`, `--key` is the only option — there is no printable equivalent.
+</Tip>

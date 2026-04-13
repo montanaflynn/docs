@@ -1,0 +1,59 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "hty",
+  "theme": "aspen",
+  "colors": {
+    "primary": "#2D6A4F",
+    "light": "#52B788",
+    "dark": "#1B4332"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/LatentEvals/hty"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Commands",
+            "pages": [
+              "commands/run-list-watch",
+              "commands/send-wait",
+              "commands/snapshot-logs-replay",
+              "commands/attach-keys",
+              "commands/kill-delete"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/ai-agents",
+              "guides/ci-automation",
+              "guides/remote-observation"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/exit-codes",
+              "reference/environment-variables",
+              "reference/session-lifecycle"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

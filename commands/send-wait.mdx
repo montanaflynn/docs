@@ -1,0 +1,196 @@
+---
+title: "hty send and wait — drive sessions and sync on output"
+description: "Drive any hty session by sending text, keystrokes, or raw bytes with hty send, then block until a condition is met using hty wait."
+---
+
+`hty send` and `hty wait` are the two commands you use to drive a running session. `hty send` injects input — a string of characters, a symbolic key name, or raw byte sequences — into the session's PTY as if a human typed them. `hty wait` blocks your script until something happens: specific text appears on screen, the screen goes quiet, or the process exits. Used together, they let you script interactive programs precisely, without polling or arbitrary sleeps.
+
+## hty send
+
+`hty send` writes input to a running session. You choose one of three modes depending on what you need to send: printable text, a named key, or a raw byte sequence.
+
+**Usage**
+
+```sh
+hty send <session> --text <string>
+hty send <session> --key <name>
+hty send <session> --bytes-hex <hex>
+```
+
+### Sending text
+
+Use `--text` to type a string of characters. Include `\n` anywhere in the string to send an Enter keypress at that position.
+
+<ParamField path="--text" type="string" required>
+  The text to send to the session. Use `\n` for Enter. The string is sent verbatim; no other escape sequences are interpreted.
+</ParamField>
+
+```sh
+hty send review --text "y\n"
+hty send my-psql --text "SELECT version();\n"
+hty send agent-task --text "hello world\n"
+```
+
+### Sending named keys
+
+Use `--key` to send a single symbolic key that has no printable representation, or when you want to be explicit about what you are sending. Run `hty keys` to print the full list of supported names.
+
+<ParamField path="--key" type="string" required>
+  A symbolic key name. Common values: `esc`, `enter`, `tab`, `backspace`, `ctrl-c`, `ctrl-d`, `ctrl-z`, `up`, `down`, `left`, `right`, `f1`–`f12`.
+</ParamField>
+
+```sh
+hty send review --key esc
+hty send review --key ctrl-c
+hty send review --key enter
+hty send review --key tab
+```
+
+### Sending raw bytes
+
+Use `--bytes-hex` when you need to inject a specific byte sequence that cannot be expressed as text or a named key — for example, an ANSI escape sequence.
+
+<ParamField path="--bytes-hex" type="string" required>
+  Bytes to send, encoded as lowercase hexadecimal with no separators. For example, `1b5b41` sends ESC [ A (cursor up).
+</ParamField>
+
+```sh
+# ESC [ A = cursor up
+hty send review --bytes-hex "1b5b41"
+
+# ESC [ B = cursor down
+hty send review --bytes-hex "1b5b42"
+```
+
+## hty wait
+
+`hty wait` blocks until a condition is met or the timeout expires. It returns a snapshot of the screen at the moment the condition is satisfied (except when waiting for process exit). Use it after `hty send` to confirm the program has responded before taking the next step.
+
+**Usage**
+
+```sh
+hty wait <session> --text <string> [--regex] [--timeout <ms>]
+hty wait <session> --idle <ms> [--timeout <ms>]
+hty wait <session> --exit [--timeout <ms>]
+```
+
+**Exit codes**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Condition met within the timeout. |
+| 3 | Timed out before the condition was met. |
+
+### Waiting for text
+
+Use `--text` to block until a specific string appears anywhere on the rendered screen. This is the most common wait mode — use it to detect prompts, banners, or completion messages.
+
+<ParamField path="--text" type="string" required>
+  Text to match on the rendered screen. Matched literally by default; use `--regex` for POSIX regular expression matching.
+</ParamField>
+
+<ParamField path="--regex" type="boolean" default="false">
+  Treat the `--text` value as a POSIX regular expression instead of a literal string.
+</ParamField>
+
+<ParamField path="--timeout" type="number" default="10000">
+  Maximum time to wait in milliseconds. Returns exit code 3 if the condition is not met before the deadline.
+</ParamField>
+
+```sh
+hty wait my-psql --text "postgres=#" --timeout 10000
+hty wait agent-task --text "Build succeeded" --timeout 60000
+hty wait review --text "Enter password" --timeout 5000
+```
+
+On success, `hty wait --text` prints a snapshot of the screen at the moment the text was matched.
+
+### Waiting for idle
+
+Use `--idle` to block until the screen has not changed for a given number of milliseconds. This is useful when you do not know the exact output your command will produce, but you do know the program will stop updating when it finishes.
+
+<ParamField path="--idle" type="number" required>
+  Minimum number of milliseconds the screen must remain unchanged before the condition is considered met.
+</ParamField>
+
+<ParamField path="--timeout" type="number" default="10000">
+  Maximum time to wait in milliseconds. Returns exit code 3 if the screen never stays idle long enough.
+</ParamField>
+
+```sh
+# Wait until the screen is quiet for 300 ms
+hty wait agent-task --idle 300 --timeout 5000
+
+# Give a long-running build up to 2 minutes, then look for 500 ms of quiet
+hty wait agent-task --idle 500 --timeout 120000
+```
+
+On success, `hty wait --idle` prints a snapshot of the screen at the moment the idle threshold was reached.
+
+### Waiting for process exit
+
+Use `--exit` to block until the session's process terminates. Combine this with a generous timeout at the end of a workflow to confirm the program finished cleanly before you inspect its exit code or output.
+
+<ParamField path="--exit" type="boolean">
+  Block until the session's process exits. No screen snapshot is returned.
+</ParamField>
+
+<ParamField path="--timeout" type="number" default="10000">
+  Maximum time to wait in milliseconds. Returns exit code 3 if the process has not exited by the deadline.
+</ParamField>
+
+```sh
+hty wait agent-task --exit --timeout 30000
+```
+
+<Note>
+  `hty wait --exit` does not return a screen snapshot. Use `hty snapshot` after the wait if you need the final screen contents.
+</Note>
+
+## Using send and wait together
+
+The following example drives an interactive database migration script from start to finish. Each `hty wait` confirms the program has reached a known state before `hty send` advances it.
+
+```sh
+# 1. Start the session
+hty run --name migrate -- ./migrate.sh
+
+# 2. Wait for the confirmation prompt
+hty wait migrate --text "Run migrations? [y/N]" --timeout 15000
+
+# 3. Capture the screen before answering (optional)
+hty snapshot migrate
+
+# 4. Confirm
+hty send migrate --text "y\n"
+
+# 5. Wait for the script to finish processing — idle for 500 ms signals completion
+hty wait migrate --idle 500 --timeout 120000
+
+# 6. Dismiss any "Press Enter to continue" prompt
+hty send migrate --key enter
+
+# 7. Wait for the process to exit cleanly
+hty wait migrate --exit --timeout 10000
+```
+
+Each `hty wait` step prevents the script from racing ahead before the program is ready. If any wait times out, the script exits with code 3, which you can detect and treat as a failure in your CI pipeline or agent loop.
+
+## Regex patterns
+
+When the text you need to match varies — for example, a shell prompt that includes a username or working directory — pass `--regex` alongside `--text` to use POSIX regular expression matching.
+
+```sh
+# Match a standard shell prompt ending with $ or #
+hty wait my-shell --text "[$#]" --regex --timeout 5000
+
+# Match "Error:" followed by any message
+hty wait agent-task --text "Error:.*" --regex --timeout 10000
+
+# Match a version string like "v1.2.3" or "v2.0.0"
+hty wait deploy --text "v[0-9]+\.[0-9]+\.[0-9]+" --regex --timeout 10000
+```
+
+<Warning>
+  POSIX regex special characters — `.`, `*`, `[`, `]`, `^`, `$`, `\`, and others — must be escaped with a backslash if you want to match them literally while `--regex` is active. When `--regex` is omitted, the pattern is always treated as a plain string.
+</Warning>

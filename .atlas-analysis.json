@@ -1,0 +1,84 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "hty",
+  "projectDescription": "A headless terminal that lets AI agents, automation scripts, and CI pipelines drive interactive TUI and CLI programs by reading the rendered screen and sending keystrokes.",
+  "theme": "aspen",
+  "primaryColor": "#2D6A4F",
+  "lightColor": "#52B788",
+  "darkColor": "#1B4332",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Commands",
+            "pages": [
+              "commands/run-list-watch",
+              "commands/send-wait",
+              "commands/snapshot-logs-replay",
+              "commands/attach-keys",
+              "commands/kill-delete"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/ai-agents",
+              "guides/ci-automation",
+              "guides/remote-observation"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/exit-codes",
+              "reference/environment-variables",
+              "reference/session-lifecycle"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Headless PTY sessions that persist across invocations via a background server",
+    "Named sessions with UUIDv7 identifiers and prefix resolution",
+    "Read the rendered screen with `hty snapshot` including full ANSI styling",
+    "Send text, named keys, or raw hex bytes to any running session",
+    "Wait primitives: block until text appears, screen goes idle, or process exits",
+    "Live session observation with `hty watch` (read-only streaming)",
+    "Bidirectional interactive attach with `hty attach`",
+    "Append-only JSONL session event logs with `hty logs` and `hty replay`",
+    "Remote observation via `$HTY_SOCKET` and SSH tunnels",
+    "Built on Ghostty's VT engine for accurate terminal emulation"
+  ],
+  "publicApiSurface": [
+    "hty run --name <name> -- <program> [args...]",
+    "hty list",
+    "hty watch <session>",
+    "hty send <session> --text <text>",
+    "hty send <session> --key <keyname>",
+    "hty send <session> --bytes-hex <hex>",
+    "hty snapshot <session>",
+    "hty wait <session> --text <needle> [--regex] [--timeout <ms>]",
+    "hty wait <session> --idle <ms> [--timeout <ms>]",
+    "hty wait <session> --exit [--timeout <ms>]",
+    "hty kill <session>",
+    "hty delete <session>",
+    "hty logs <session>",
+    "hty replay <session>",
+    "hty attach <session>",
+    "hty keys",
+    "HTY_SOCKET environment variable for custom/remote socket path",
+    "Wire protocol ops: spawn, list, snapshot, send_text, send_key, send_bytes_hex, resize, wait_for_text, wait_for_idle, wait_for_exit, kill, delete, attach"
+  ]
+}

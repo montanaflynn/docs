@@ -1,0 +1,151 @@
+---
+title: 'Drive interactive TUI and CLI programs from AI agents'
+description: 'Use hty to give AI agents control over TUI programs — read the screen, send keystrokes, and wait for specific output without modifying the target tool.'
+---
+
+LLMs and autonomous agents can call shell commands, but they have no way to interact with programs that expect keyboard input — tools like `vim`, `psql`, `git add -p`, or any TUI that draws to a terminal. hty solves this by running those programs inside a managed pseudoterminal, then exposing their screen state and input as simple CLI commands your agent can call.
+
+## The automation loop
+
+Every hty workflow follows the same pattern: start a session, wait for something meaningful, read the screen, send input, repeat.
+
+```sh
+hty run --name <session> -- <program> [args]   # start
+hty wait <session> --text "prompt text"        # wait
+hty snapshot <session>                         # read
+hty send <session> --text "response\n"         # send
+hty wait <session> --exit                      # finish
+```
+
+This loop is composable — your agent can branch based on snapshot output, retry on timeout, or handle unexpected prompts by inspecting what's actually on screen.
+
+## Reading the screen
+
+`hty snapshot <session>` returns a JSON object describing the current rendered terminal state:
+
+```json
+{
+  "snapshot": {
+    "buffer": "Are you sure? [y/N] ",
+    "lines": [
+      "",
+      "Are you sure? [y/N] "
+    ],
+    "screen_ansi": "\u001b[2;1HAre you sure? \u001b[33m[y/N]\u001b[0m ",
+    "cursor_row": 2,
+    "cursor_col": 21,
+    "status": "running"
+  }
+}
+```
+
+| Field | Description |
+|---|---|
+| `buffer` | Plain text of the entire screen. Use this for LLM consumption — no escape codes. |
+| `lines` | Array of individual rows. Useful for inspecting specific lines by index. |
+| `screen_ansi` | Screen content with ANSI color codes preserved. Use this for visual rendering. |
+| `cursor_row` / `cursor_col` | Current cursor position (1-indexed). |
+| `status` | `"running"` or `"exited"`. Check this before waiting to avoid blocking on a dead process. |
+
+For agent use, pass `buffer` directly to the LLM as context. It reads like a screenshot of the terminal in plain text.
+
+## Sending input
+
+Use `--text` to type characters exactly as a user would:
+
+```sh
+hty send review --text "y\n"        # type 'y' then press Enter
+hty send review --text "mypassword" # type a string
+```
+
+Use `--key` for named keys:
+
+```sh
+hty send review --key enter
+hty send review --key esc
+hty send review --key ctrl-c
+hty send review --key up
+hty send review --key ctrl-d
+```
+
+<Tip>
+Prefer `--text "answer\n"` over `--text "answer"` followed by `--key enter` — it's one fewer round-trip and avoids any timing gap.
+</Tip>
+
+## Handling timeouts
+
+`hty wait` blocks until the condition is met or the timeout expires. When the timeout expires, hty exits with code **3**.
+
+```sh
+hty wait review --text "Stage this hunk" --timeout 5000
+if [ $? -eq 3 ]; then
+  echo "Timed out waiting for prompt"
+  hty snapshot review   # inspect actual screen state
+  hty delete review
+  exit 1
+fi
+```
+
+Exit codes you should handle:
+
+| Code | Meaning |
+|---|---|
+| 0 | Condition met |
+| 1 | General error |
+| 2 | Session not found |
+| 3 | Wait timed out |
+| 4 | Ambiguous session prefix |
+
+## A complete example
+
+This walks through automating `git add -p`, which presents each diff hunk interactively and asks whether to stage it.
+
+```sh
+# Start the session with a descriptive name
+hty run --name review -- git add -p
+
+# Wait for the first hunk prompt — up to 5 seconds
+hty wait review --text "Stage this hunk" --timeout 5000
+
+# Inspect what's on screen (useful for debugging or LLM context)
+hty snapshot review
+
+# Stage this hunk
+hty send review --text "y\n"
+
+# Wait for the screen to settle after input
+hty wait review --idle 200 --timeout 3000
+
+# Skip the next hunk
+hty send review --text "n\n"
+
+# Quit the interactive session
+hty send review --text "q\n"
+
+# Wait for git to finish
+hty wait review --exit --timeout 2000
+
+# Clean up the session record
+hty delete review
+```
+
+## Tips for agents
+
+**Name sessions descriptively.** Use `--name task-123` or `--name user-review-abc` so logs and `hty list` output are meaningful when multiple sessions run in parallel.
+
+**Use `--regex` for flexible matching.** Prompt text can vary — use a pattern instead of a literal string:
+
+```sh
+hty wait review --text "Stage this hunk.*\?" --regex --timeout 5000
+```
+
+**Check `status` before waiting.** If the process already exited, `hty wait --exit` returns immediately, but `hty wait --text` will block until timeout. Read `snapshot.status` first:
+
+```sh
+STATUS=$(hty snapshot review | jq -r '.snapshot.status')
+if [ "$STATUS" = "exited" ]; then
+  echo "Process already finished"
+fi
+```
+
+**Always clean up.** Call `hty delete <session>` when the task is done. This removes the session record and its log file. The server shuts down automatically 10 seconds after no sessions remain.
